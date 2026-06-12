@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <title>黑色武士 VS 蒸汽騎士 - 終極聲光音效版</title>
+    <style>
+        body { background: #1a1a1a; color: #fff; font-family: 'Arial Black', sans-serif; text-align: center; margin: 0; padding: 20px; select: none; }
+        canvas { background: #2d2d2d; border: 4px solid #444; display: block; margin: 20px auto; box-shadow: 0 0 25px rgba(0,0,0,0.7); cursor: pointer; }
+        .instructions { max-width: 800px; margin: 0 auto; text-align: left; background: #333; padding: 15px; border-radius: 5px; border-left: 5px solid #ffbc00; font-family: sans-serif; }
+        span { font-weight: bold; color: #ffbc00; }
+        .audio-tip { color: #5bc0de; font-weight: bold; animation: blink 1.5s infinite; }
+        @keyframes blink { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+    </style>
+</head>
+<body>
+
+    <h1>黑色武士 VS 蒸汽騎士</h1>
+    <p class="audio-tip">🔊 【聲光激增版】請先在畫布（遊戲畫面）上點擊一下滑鼠以啟用 BGM 背景音樂！</p>
+    
+    <canvas id="gameCanvas" width="800" height="400"></canvas>
+
+    <div class="instructions">
+        <h3>🎮 操作說明：</h3>
+        <p>🔴 <span>玩家 1 (左邊 - 黑色武士)</span>：<b>A / D</b> 移動，<b>W</b> 跳躍，<b>J</b> 鍵：輕拳（揮刀音效），<b>K</b> 鍵：<span>必殺技・緋紅斬</span>（雷電爆發音）</p>
+        <p>🤖 <span>電腦對手 (右邊 - 蒸汽騎士)</span>：會自動過來進攻。被擊中時會發出金屬撞擊聲，施展必殺技時會發出蒸汽噴射與爆炸聲。</p>
+    </div>
+
+<script>
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+const GRAVITY = 0.6;
+
+// --- 1. 素材與音效網址實裝 ---
+const P1_SPRITE_URL = "https://raw.githubusercontent.com/Ansimuz/WARP/master/spritesheet/player/player-spritesheet.png";
+const P2_SPRITE_URL = "https://raw.githubusercontent.com/Ansimuz/WARP/master/spritesheet/enemies/heavy-bot/heavy-bot.png";
+
+const p1Image = new Image(); p1Image.src = P1_SPRITE_URL;
+const p2Image = new Image(); p2Image.src = P2_SPRITE_URL;
+
+// 免費開源音效資源
+const BGM_URL = "https://actions.google.com/sounds/v1/science_fiction/deep_space.ogg"; // 賽博龐克低音BGM
+const SND_SWORD = "https://actions.google.com/sounds/v1/science_fiction/synth_flyby.ogg"; // 揮刀輕攻擊
+const SND_LIGHT_HIT = "https://actions.google.com/sounds/v1/impacts/flesh_hit_body_fall.ogg"; // 擊中肉體/輕打擊
+const SND_HEAVY_HIT = "https://actions.google.com/sounds/v1/weapons/firework_rocket_launch.ogg"; // 必殺技爆炸/重擊
+const SND_STEAM = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg"; // 蒸汽噴射替代音（低沉警報感）
+
+// 初始化音頻物件
+const bgm = new Audio(BGM_URL);
+bgm.loop = true;
+bgm.volume = 0.4; // 背景音樂小聲點，避免蓋過音效
+
+// 點擊畫面啟用音訊（解鎖瀏覽器限制）
+let audioInitialized = false;
+canvas.addEventListener('click', () => {
+    if (!audioInitialized) {
+        bgm.play().catch(e => console.log("音樂播放失敗，需點擊頁面：", e));
+        audioInitialized = true;
+        document.querySelector('.audio-tip').innerHTML = "🎵 BGM 播放中！盡情享受戰鬥吧！";
+        document.querySelector('.audio-tip').style.color = "#4afc53";
+    }
+});
+
+// 播放音效的輔助函式（允許重複快速重疊播放）
+function playSound(url, volume = 0.6) {
+    if (!audioInitialized) return; // 未解鎖前不播放
+    let sound = new Audio(url);
+    sound.volume = volume;
+    sound.play().catch(e => {});
+}
+
+// --- 特效全域變數 ---
+let screenShakeTimer = 0;
+let screenShakeIntensity = 0;
+let comboCount = 0;
+let comboTimer = 0;
+let hitSparks = [];
+
+function triggerScreenShake(duration, intensity) {
+    screenShakeTimer = duration;
+    screenShakeIntensity = intensity;
+}
+
+function createHitSpark(x, y) {
+    for (let i = 0; i < 8; i++) {
+        hitSparks.push({
+            x: x, y: y,
+            vx: (Math.random() - 0.5) * 8,
+            vy: (Math.random() - 0.5) * 8,
+            radius: Math.random() * 4 + 2,
+            alpha: 1,
+            color: Math.random() < 0.5 ? "#ffcc00" : "#ff3300"
+        });
+    }
+}
+
+class Fighter {
+    constructor(x, y, name, side) {
+        this.name = name;
+        this.x = x; this.y = y; this.side = side;
+        this.width = name === "蒸汽騎士" ? 120 : 80;
+        this.height = name === "蒸汽騎士" ? 120 : 96;
+        
+        this.hp = 100; this.vx = 0; this.vy = 0;
+        this.isGrounded = false;
+        this.speed = name === "蒸汽騎士" ? 3.5 : 5;
+        
+        this.state = "idle"; this.stateTimer = 0;
+        this.hasArmor = false; this.isInvincible = false; this.isBlocking = false;
+
+        this.frameX = 0; this.frameY = 0; this.maxFrames = 4;
+        this.animTimer = 0; this.animSpeed = 8;
+
+        this.hitbox = { active: false, x: 0, y: 0, w: 0, h: 0, damage: 0, knockback: 0, type: "" };
+    }
+
+    changeState(newState, duration = 0) {
+        this.state = newState;
+        this.stateTimer = duration;
+        this.frameX = 0; this.animTimer = 0;
+
+        if (this.name === "黑色武士") {
+            switch(newState) {
+                case "idle":    this.frameY = 0; this.maxFrames = 4; this.animSpeed = 10; break;
+                case "run":     this.frameY = 1; this.maxFrames = 6; this.animSpeed = 6;  break;
+                case "attack":  this.frameY = 2; this.maxFrames = 5; this.animSpeed = 4;  break;
+                case "special": this.frameY = 3; this.maxFrames = 4; this.animSpeed = 5;  break;
+                case "hit":     this.frameY = 4; this.maxFrames = 2; this.animSpeed = 8;  break;
+                case "block":   this.frameY = 0; this.maxFrames = 1; this.animSpeed = 10; break;
+            }
+        } else {
+            switch(newState) {
+                case "idle":    this.frameY = 0; this.maxFrames = 4; this.animSpeed = 12; break;
+                case "run":     this.frameY = 1; this.maxFrames = 4; this.animSpeed = 8;  break;
+                case "attack":  this.frameY = 2; this.maxFrames = 4; this.animSpeed = 5;  break;
+                case "special": this.frameY = 2; this.maxFrames = 4; this.animSpeed = 4;  break;
+                case "hit":     this.frameY = 3; this.maxFrames = 2; this.animSpeed = 10; break;
+                case "block":   this.frameY = 0; this.maxFrames = 1; this.animSpeed = 10; break;
+            }
+        }
+    }
+
+    update() {
+        this.vy += GRAVITY; this.x += this.vx; this.y += this.vy;
+
+        if (this.y + this.height >= canvas.height - 40) {
+            this.y = canvas.height - 40 - this.height;
+            this.vy = 0; this.isGrounded = true;
+        }
+
+        if (this.x < 0) this.x = 0;
+        if (this.x + this.width > canvas.width) this.x = canvas.width - this.width;
+
+        if (this.stateTimer > 0) {
+            this.stateTimer--;
+            if (this.stateTimer === 0) {
+                this.hasArmor = false; this.isInvincible = false; this.hitbox.active = false;
+                this.changeState("idle");
+            }
+        }
+
+        if (this.state === "special" && this.name === "黑色武士") {
+            this.isInvincible = this.stateTimer > 12;
+            this.vy = -0.5; this.vx = this.side === "left" ? 3 : -3;
+            this.hitbox.x = this.side === "left" ? this.x + this.width - 20 : this.x - 60;
+            this.hitbox.y = this.y - 10;
+        }
+
+        if (this.state === "special" && this.name === "蒸汽騎士") {
+            this.hasArmor = true;
+            this.vx = this.side === "left" ? 8 : -8;
+            this.hitbox.x = this.side === "left" ? this.x + this.width - 30 : this.x - 50;
+            this.hitbox.y = this.y + 30;
+        }
+
+        this.animTimer++;
+        if (this.animTimer >= this.animSpeed) {
+            this.animTimer = 0;
+            this.frameX = (this.frameX + 1) % this.maxFrames;
+        }
+    }
+
+    draw() {
+        ctx.save();
+        let image = this.name === "黑色武士" ? p1Image : p2Image;
+        let imgWidth = this.name === "黑色武士" ? 64 : 80;
+        let imgHeight = 64;
+
+        if (this.side === "right") {
+            ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
+            ctx.scale(-1, 1);
+            ctx.drawImage(image, this.frameX * imgWidth, this.frameY * imgHeight, imgWidth, imgHeight, -this.width / 2, -this.height / 2, this.width, this.height);
+        } else {
+            ctx.drawImage(image, this.frameX * imgWidth, this.frameY * imgHeight, imgWidth, imgHeight, this.x, this.y, this.width, this.height);
+        }
+        ctx.restore();
+
+        if (this.isInvincible) { ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.fillRect(this.x, this.y, this.width, this.height); }
+        if (this.hasArmor) { ctx.fillStyle = "rgba(74,252,83,0.2)"; ctx.fillRect(this.x, this.y, this.width, this.height); }
+    }
+
+    lightAttack() {
+        this.changeState("attack", 15);
+        this.vx = 0;
+        this.hitbox.active = true;
+        this.hitbox.w = this.name === "蒸汽騎士" ? 80 : 60;
+        this.hitbox.h = 30;
+        this.hitbox.x = this.side === "left" ? this.x + this.width - 20 : this.x - 40;
+        this.hitbox.y = this.y + 40;
+        this.hitbox.damage = 6;
+        this.hitbox.knockback = 5;
+        this.hitbox.type = "light";
+
+        // 🔊 播放揮刀/出拳音效
+        playSound(SND_SWORD, 0.5);
+    }
+
+    specialAttack() {
+        if (this.name === "黑色武士") {
+            this.changeState("special", 24);
+            this.vy = -10;
+            this.hitbox.active = true;
+            this.hitbox.w = 70; this.hitbox.h = 120;
+            this.hitbox.damage = 15; this.hitbox.knockback = 8;
+            this.hitbox.type = "crimson_slash";
+
+            // 🔊 黑色武士大招：雷電刀鳴聲
+            playSound(SND_SWORD, 0.8);
+        } else {
+            this.changeState("special", 20);
+            this.hitbox.active = true;
+            this.hitbox.w = 60; this.hitbox.h = 60;
+            this.hitbox.damage = 14; this.hitbox.knockback = 14;
+            this.hitbox.type = "steam_charge";
+
+            // 🔊 蒸汽騎士大招：蒸汽噴射爆發現
+            playSound(SND_STEAM, 0.7);
+        }
+    }
+
+    takeDamage(hitbox, attackerX) {
+        if (this.isInvincible) return;
+
+        let sparkX = this.x + this.width / 2;
+        let sparkY = hitbox.y + hitbox.h / 2;
+
+        if (this.isBlocking) {
+            this.changeState("block", 8);
+            this.hp -= hitbox.damage * 0.1;
+            this.vx = this.x > attackerX ? 2 : -2;
+            createHitSpark(sparkX, sparkY);
+            triggerScreenShake(3, 2);
+            
+            // 🔊 防禦成功音效（輕微悶擊聲）
+            playSound(SND_LIGHT_HIT, 0.3);
+            return;
+        }
+
+        createHitSpark(sparkX, sparkY); 
+        
+        // 🔊 根據受擊類型播放對應音效
+        if (hitbox.type === "crimson_slash" || hitbox.type === "steam_charge") {
+            triggerScreenShake(12, 8);
+            playSound(SND_HEAVY_HIT, 0.9); // 大招命中：劇烈爆炸聲
+        } else {
+            triggerScreenShake(6, 4);
+            playSound(SND_LIGHT_HIT, 0.7); // 普通攻擊命中
+        }
+
+        if (attackerX === p1.x) {
+            comboCount++; comboTimer = 60;
+        }
+
+        if (this.hasArmor) { this.hp -= hitbox.damage; return; }
+
+        this.changeState("hit", 20);
+        this.hp -= hitbox.damage;
+        this.hitbox.active = false;
+
+        let dir = this.x > attackerX ? 1 : -1;
+        this.vx = dir * hitbox.knockback;
+        if (hitbox.type === "crimson_slash") this.vy = -5;
+    }
+}
+
+const p1 = new Fighter(150, 200, "黑色武士", "left");
+const p2 = new Fighter(550, 200, "蒸汽騎士", "right");
+
+const keys = {};
+window.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
+window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
+
+function checkCollision(rect1, rect2) {
+    return rect1.x < rect2.x + rect2.w && rect1.x + rect1.w > rect2.x && rect1.y < rect2.y + rect2.h && rect1.y + rect1.h > rect2.y;
+}
+
+function gameLoop() {
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    ctx.save();
+    if (screenShakeTimer > 0) {
+        let dx = (Math.random() - 0.5) * screenShakeIntensity;
+        let dy = (Math.random() - 0.5) * screenShakeIntensity;
+        ctx.translate(dx, dy); screenShakeTimer--;
+    }
+
+    ctx.fillStyle = "#1e1e24"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = "#3a3a45"; ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
+
+    // P1 控制
+    if (["idle", "run"].includes(p1.state)) {
+        p1.isBlocking = keys['a'] && p1.x > p2.x;
+        if (keys['a']) { p1.vx = -p1.speed; if (p1.state !== "run") p1.changeState("run"); }
+        else if (keys['d']) { p1.vx = p1.speed; if (p1.state !== "run") p1.changeState("run"); }
+        else { p1.vx = 0; if (p1.state !== "idle") p1.changeState("idle"); }
+
+        if (keys['w'] && p1.isGrounded) { p1.vy = -12; p1.isGrounded = false; }
+        if (keys['j']) p1.lightAttack();
+        if (keys['k']) p1.specialAttack();
+    }
+
+    // P2 AI 控制
+    if (["idle", "run"].includes(p2.state)) {
+        let distance = Math.abs(p2.x - p1.x);
+        if (p1.state === "attack" && distance < 140 && Math.random() < 0.5) {
+            p2.isBlocking = p2.x < p1.x ? true : false; p2.vx = 0;
+        } else {
+            p2.isBlocking = false;
+            if (distance > 110) {
+                p2.vx = p2.x > p1.x ? -p2.speed : p2.speed;
+                if (p2.state !== "run") p2.changeState("run");
+                if (Math.random() < 0.008) p2.specialAttack();
+            } else {
+                p2.vx = 0;
+                let attackChoice = Math.random();
+                if (attackChoice < 0.03) p2.lightAttack();
+                else if (attackChoice < 0.045) p2.specialAttack();
+                else if (p2.state !== "idle") p2.changeState("idle");
+            }
+        }
+    }
+
+    if (["idle", "run"].includes(p1.state)) p1.side = p1.x < p2.x ? "left" : "right";
+    if (["idle", "run"].includes(p2.state)) p2.side = p2.x < p1.x ? "left" : "right";
+
+    p1.update(); p2.update();
+
+    if (p1.hitbox.active && checkCollision(p1.hitbox, { x: p2.x, y: p2.y, w: p2.width, h: p2.height })) {
+        p2.takeDamage(p1.hitbox, p1.x); p1.hitbox.active = false;
+    }
+    if (p2.hitbox.active && checkCollision(p2.hitbox, { x: p1.x, y: p1.y, w: p1.width, h: p1.height })) {
+        p1.takeDamage(p2.hitbox, p2.x); p2.hitbox.active = false;
+        comboCount = 0;
+    }
+
+    p1.draw(); p2.draw();
+
+    for (let i = hitSparks.length - 1; i >= 0; i--) {
+        let s = hitSparks[i]; s.x += s.vx; s.y += s.vy; s.alpha -= 0.04;
+        if (s.alpha <= 0) { hitSparks.splice(i, 1); continue; }
+        ctx.fillStyle = s.color; ctx.globalAlpha = s.alpha; ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.globalAlpha = 1.0; ctx.restore();
+
+    // UI
+    ctx.fillStyle = "#444"; ctx.fillRect(40, 20, 320, 24); ctx.fillRect(440, 20, 320, 24);
+    ctx.fillStyle = "#ff2a2a";
+    if (p1.hp > 0) ctx.fillRect(40, 20, p1.hp * 3.2, 24);
+    if (p2.hp > 0) ctx.fillRect(440 + (320 - p2.hp * 3.2), 20, p2.hp * 3.2, 24);
+
+    ctx.fillStyle = "#fff"; ctx.font = "bold 16px sans-serif";
+    ctx.fillText(p1.name, 40, 15); ctx.fillText(p2.name, 760 - ctx.measureText(p2.name).width, 15);
+
+    if (comboCount > 1 && comboTimer > 0) {
+        comboTimer--; ctx.fillStyle = "#ffbc00"; ctx.font = "italic bold 36px 'Arial Black'";
+        ctx.strokeStyle = "#000"; ctx.lineWidth = 6;
+        let comboText = comboCount + " COMBO";
+        ctx.strokeText(comboText, 60, 90); ctx.fillText(comboText, 60, 90);
+        if (comboTimer <= 0) comboCount = 0;
+    }
+
+    if (p1.hp <= 0 || p2.hp <= 0) {
+        ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,canvas.width,canvas.height);
+        ctx.fillStyle = "#ffbc00"; ctx.font = "bold 40px sans-serif";
+        let winner = p1.hp <= 0 ? p2.name : p1.name;
+        ctx.fillText(winner + " 獲勝！", canvas.width/2 - 100, canvas.height/2);
+        bgm.pause(); // 結束時音樂停止
+        return;
+    }
+    requestAnimationFrame(gameLoop);
+}
+
+let loadedImages = 0;
+function imgLoaded() { loadedImages++; if(loadedImages === 2) gameLoop(); }
+p1Image.onload = imgLoaded; p2Image.onload = imgLoaded;
+</script>
+</body>
+</html>
