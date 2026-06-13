@@ -2,397 +2,843 @@
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
-    <title>黑色武士 VS 蒸汽騎士 - 終極聲光音效版</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pixel Mecha Arcade - 忍者三發手裡劍修正版</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.0/p5.js"></script>
     <style>
-        body { background: #1a1a1a; color: #fff; font-family: 'Arial Black', sans-serif; text-align: center; margin: 0; padding: 20px; select: none; }
-        canvas { background: #2d2d2d; border: 4px solid #444; display: block; margin: 20px auto; box-shadow: 0 0 25px rgba(0,0,0,0.7); cursor: pointer; }
-        .instructions { max-width: 800px; margin: 0 auto; text-align: left; background: #333; padding: 15px; border-radius: 5px; border-left: 5px solid #ffbc00; font-family: sans-serif; }
-        span { font-weight: bold; color: #ffbc00; }
-        .audio-tip { color: #5bc0de; font-weight: bold; animation: blink 1.5s infinite; }
-        @keyframes blink { 0% { opacity: 0.4; } 50% { opacity: 1; } 100% { opacity: 0.4; } }
+        body {
+            margin: 0;
+            padding: 0;
+            background-color: #030305;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            color: white;
+            font-family: monospace;
+            overflow: hidden;
+        }
+        canvas {
+            border: 6px solid #1a1c23;
+            box-shadow: 0 0 50px rgba(0, 229, 255, 0.15), 0 0 20px rgba(255, 0, 85, 0.1);
+            image-rendering: -moz-crisp-edges;
+            image-rendering: -webkit-crisp-edges;
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+            width: 960px;  
+            height: 540px; 
+        }
     </style>
 </head>
 <body>
 
-    <h1>黑色武士 VS 蒸汽騎士</h1>
-    <p class="audio-tip">🔊 【聲光激增版】請先在畫布（遊戲畫面）上點擊一下滑鼠以啟用 BGM 背景音樂！</p>
-    
-    <canvas id="gameCanvas" width="800" height="400"></canvas>
-
-    <div class="instructions">
-        <h3>🎮 操作說明：</h3>
-        <p>🔴 <span>玩家 1 (左邊 - 黑色武士)</span>：<b>A / D</b> 移動，<b>W</b> 跳躍，<b>J</b> 鍵：輕拳（揮刀音效），<b>K</b> 鍵：<span>必殺技・緋紅斬</span>（雷電爆發音）</p>
-        <p>🤖 <span>電腦對手 (右邊 - 蒸汽騎士)</span>：會自動過來進攻。被擊中時會發出金屬撞擊聲，施展必殺技時會發出蒸汽噴射與爆炸聲。</p>
-    </div>
-
 <script>
-const canvas = document.getElementById("gameCanvas");
-const ctx = canvas.getContext("2d");
+let player;
+let enemy;
 
-const GRAVITY = 0.6;
+const V_WIDTH = 320;  
+const V_HEIGHT = 180; 
 
-// --- 1. 素材與音效網址實裝 ---
-const P1_SPRITE_URL = "https://raw.githubusercontent.com/Ansimuz/WARP/master/spritesheet/player/player-spritesheet.png";
-const P2_SPRITE_URL = "https://raw.githubusercontent.com/Ansimuz/WARP/master/spritesheet/enemies/heavy-bot/heavy-bot.png";
+const GROUND_Y = 145; 
+const GRAVITY = 0.4;  
 
-const p1Image = new Image(); p1Image.src = P1_SPRITE_URL;
-const p2Image = new Image(); p2Image.src = P2_SPRITE_URL;
+const STAGE_SELECT = 'SELECT';
+const STAGE_FIGHT = 'FIGHT';
+let currentStage = STAGE_SELECT;
 
-// 免費開源音效資源
-const BGM_URL = "https://actions.google.com/sounds/v1/science_fiction/deep_space.ogg"; // 賽博龐克低音BGM
-const SND_SWORD = "https://actions.google.com/sounds/v1/science_fiction/synth_flyby.ogg"; // 揮刀輕攻擊
-const SND_LIGHT_HIT = "https://actions.google.com/sounds/v1/impacts/flesh_hit_body_fall.ogg"; // 擊中肉體/輕打擊
-const SND_HEAVY_HIT = "https://actions.google.com/sounds/v1/weapons/firework_rocket_launch.ogg"; // 必殺技爆炸/重擊
-const SND_STEAM = "https://actions.google.com/sounds/v1/alarms/digital_watch_alarm_long.ogg"; // 蒸汽噴射替代音（低沉警報感）
+const STATE_IDLE = 'IDLE';
+const STATE_MOVE = 'MOVE';
+const STATE_BLOCK = 'BLOCK'; 
+const STATE_ATTACK = 'ATTACK_PUNCH';
+const STATE_ATTACK_SPECIAL = 'ATTACK_SPECIAL'; 
+const STATE_ATTACK_EX = 'ATTACK_EX'; 
+const STATE_HURT = 'HURT';
 
-// 初始化音頻物件
-const bgm = new Audio(BGM_URL);
-bgm.loop = true;
-bgm.volume = 0.4; // 背景音樂小聲點，避免蓋過音效
+let FXs = [];
+let projectiles = [];
+let items = []; 
+let gameOver = false;
+let gameClear = false; 
 
-// 點擊畫面啟用音訊（解鎖瀏覽器限制）
-let audioInitialized = false;
-canvas.addEventListener('click', () => {
-    if (!audioInitialized) {
-        bgm.play().catch(e => console.log("音樂播放失敗，需點擊頁面：", e));
-        audioInitialized = true;
-        document.querySelector('.audio-tip').innerHTML = "🎵 BGM 播放中！盡情享受戰鬥吧！";
-        document.querySelector('.audio-tip').style.color = "#4afc53";
+let playerSelectedIdx = 4; // 預設忍者
+let enemySelectedIdx = 1;
+
+let itemSpawnTimer = 0; 
+let currentWave = 1; 
+let waveClearTimer = 0; 
+let bossIntroTimer = 0; // 🛠️ 修正：新增獨立的 BOSS 登場計時器
+
+const MECHA_PRESETS = [
+    {
+        name: "MECHA_01", desc: "BALANCED TYPE", skill: "PLASMA CANNON", exSkill: "MEGA PLASMA",
+        mainColor: "#00e5ff", darkColor: "#005f87", liteColor: "#e0ffff", shadowColor: "#002b47", speed: 1.9, jumpForce: -5.8, scale: 1.0, hpMax: 300,
+        projType: 'PLASMA', isDragon: false, isNinja: false, isBoss: false
+    },
+    {
+        name: "MECHA_02", desc: "HEAVY ARMOR", skill: "FLAME LASER", exSkill: "VOLCANO LASER",
+        mainColor: "#ff0055", darkColor: "#80002a", liteColor: "#ff99bb", shadowColor: "#400015", speed: 1.3, jumpForce: -5.0, scale: 1.25, hpMax: 390, 
+        projType: 'LASER', isDragon: false, isNinja: false, isBoss: false
+    },
+    {
+        name: "MECHA_03", desc: "NINJA SPEED", skill: "MICRO MISSILE", exSkill: "MISSILE RAIN",
+        mainColor: "#39ff14", darkColor: "#006600", liteColor: "#ccffbb", shadowColor: "#003300", speed: 2.4, jumpForce: -6.5, scale: 0.9, hpMax: 270,   
+        projType: 'MISSILE', isDragon: false, isNinja: false, isBoss: false
+    },
+    {
+        name: "M_DRAGON", desc: "CYBER BEAST", skill: "LAVA FIREBALL", exSkill: "METEOR STRIKE",
+        mainColor: "#ffaa00", darkColor: "#804000", liteColor: "#ffebaa", shadowColor: "#401a00", speed: 1.5, jumpForce: -5.3, scale: 1.2, hpMax: 420, 
+        projType: 'DRAGON_FIRE', isDragon: true, isNinja: false, isBoss: false
+    },
+    {
+        name: "M_SHINOBI", desc: "SHADOW STRIKER", skill: "SHURIKEN", exSkill: "TRIPLE SHURIKEN",
+        mainColor: "#ff00ff", darkColor: "#5e0b5e", liteColor: "#ffbfae", shadowColor: "#300030", speed: 2.6, jumpForce: -6.7, scale: 0.95, hpMax: 255, 
+        projType: 'SHURIKEN', isDragon: false, isNinja: true, isBoss: false
     }
-});
+];
 
-// 播放音效的輔助函式（允許重複快速重疊播放）
-function playSound(url, volume = 0.6) {
-    if (!audioInitialized) return; // 未解鎖前不播放
-    let sound = new Audio(url);
-    sound.volume = volume;
-    sound.play().catch(e => {});
+const BOSS_PRESET = {
+    name: "OMEGA_MECHA", desc: "FINAL BOSS", skill: "HEAVY LASER", exSkill: "NUKING MISSILE",
+    mainColor: "#ff3300", darkColor: "#5e0000", liteColor: "#ffe600", shadowColor: "#210000", speed: 1.1, jumpForce: -4.5, scale: 1.8, hpMax: 1500,
+    projType: 'BOSS_NUKE', isDragon: false, isNinja: false, isBoss: true
+};
+
+function setup() {
+    createCanvas(V_WIDTH, V_HEIGHT);
+    noSmooth(); 
+    rollEnemyRandom(); 
 }
 
-// --- 特效全域變數 ---
-let screenShakeTimer = 0;
-let screenShakeIntensity = 0;
-let comboCount = 0;
-let comboTimer = 0;
-let hitSparks = [];
-
-function triggerScreenShake(duration, intensity) {
-    screenShakeTimer = duration;
-    screenShakeIntensity = intensity;
+function rollEnemyRandom() {
+    enemySelectedIdx = floor(random(0, MECHA_PRESETS.length));
 }
 
-function createHitSpark(x, y) {
-    for (let i = 0; i < 8; i++) {
-        hitSparks.push({
-            x: x, y: y,
-            vx: (Math.random() - 0.5) * 8,
-            vy: (Math.random() - 0.5) * 8,
-            radius: Math.random() * 4 + 2,
-            alpha: 1,
-            color: Math.random() < 0.5 ? "#ffcc00" : "#ff3300"
-        });
-    }
+function initBattle() {
+    currentWave = 1; 
+    bossIntroTimer = 0;
+    player = new MechaFighter(60, 80, 24, 34, MECHA_PRESETS[playerSelectedIdx], true);  
+    spawnNextEnemy();
+    FXs = []; projectiles = []; items = [];
+    itemSpawnTimer = 0; waveClearTimer = 0;
+    gameOver = false; gameClear = false; currentStage = STAGE_FIGHT;
 }
 
-class Fighter {
-    constructor(x, y, name, side) {
-        this.name = name;
-        this.x = x; this.y = y; this.side = side;
-        this.width = name === "蒸汽騎士" ? 120 : 80;
-        this.height = name === "蒸汽騎士" ? 120 : 96;
+function spawnNextEnemy() {
+    if (currentWave === 3) {
+        bossIntroTimer = 0; // 重置 BOSS 登場計時
+        enemy = new MechaFighter(220, 40, 24, 34, BOSS_PRESET, false);
+        enemy.hp = enemy.hpMax;
+        enemy.damageMultiplier = 1.0;
+        enemy.aiSpeedUp = 8; 
+    } else {
+        rollEnemyRandom();
+        enemy = new MechaFighter(240, 80, 24, 34, MECHA_PRESETS[enemySelectedIdx], false); 
         
-        this.hp = 100; this.vx = 0; this.vy = 0;
-        this.isGrounded = false;
-        this.speed = name === "蒸汽騎士" ? 3.5 : 5;
+        let modifier = 1 + (currentWave - 1) * 0.20; 
+        let speedModifier = 1 + (currentWave - 1) * 0.10; 
         
-        this.state = "idle"; this.stateTimer = 0;
-        this.hasArmor = false; this.isInvincible = false; this.isBlocking = false;
-
-        this.frameX = 0; this.frameY = 0; this.maxFrames = 4;
-        this.animTimer = 0; this.animSpeed = 8;
-
-        this.hitbox = { active: false, x: 0, y: 0, w: 0, h: 0, damage: 0, knockback: 0, type: "" };
-    }
-
-    changeState(newState, duration = 0) {
-        this.state = newState;
-        this.stateTimer = duration;
-        this.frameX = 0; this.animTimer = 0;
-
-        if (this.name === "黑色武士") {
-            switch(newState) {
-                case "idle":    this.frameY = 0; this.maxFrames = 4; this.animSpeed = 10; break;
-                case "run":     this.frameY = 1; this.maxFrames = 6; this.animSpeed = 6;  break;
-                case "attack":  this.frameY = 2; this.maxFrames = 5; this.animSpeed = 4;  break;
-                case "special": this.frameY = 3; this.maxFrames = 4; this.animSpeed = 5;  break;
-                case "hit":     this.frameY = 4; this.maxFrames = 2; this.animSpeed = 8;  break;
-                case "block":   this.frameY = 0; this.maxFrames = 1; this.animSpeed = 10; break;
-            }
-        } else {
-            switch(newState) {
-                case "idle":    this.frameY = 0; this.maxFrames = 4; this.animSpeed = 12; break;
-                case "run":     this.frameY = 1; this.maxFrames = 4; this.animSpeed = 8;  break;
-                case "attack":  this.frameY = 2; this.maxFrames = 4; this.animSpeed = 5;  break;
-                case "special": this.frameY = 2; this.maxFrames = 4; this.animSpeed = 4;  break;
-                case "hit":     this.frameY = 3; this.maxFrames = 2; this.animSpeed = 10; break;
-                case "block":   this.frameY = 0; this.maxFrames = 1; this.animSpeed = 10; break;
-            }
-        }
-    }
-
-    update() {
-        this.vy += GRAVITY; this.x += this.vx; this.y += this.vy;
-
-        if (this.y + this.height >= canvas.height - 40) {
-            this.y = canvas.height - 40 - this.height;
-            this.vy = 0; this.isGrounded = true;
-        }
-
-        if (this.x < 0) this.x = 0;
-        if (this.x + this.width > canvas.width) this.x = canvas.width - this.width;
-
-        if (this.stateTimer > 0) {
-            this.stateTimer--;
-            if (this.stateTimer === 0) {
-                this.hasArmor = false; this.isInvincible = false; this.hitbox.active = false;
-                this.changeState("idle");
-            }
-        }
-
-        if (this.state === "special" && this.name === "黑色武士") {
-            this.isInvincible = this.stateTimer > 12;
-            this.vy = -0.5; this.vx = this.side === "left" ? 3 : -3;
-            this.hitbox.x = this.side === "left" ? this.x + this.width - 20 : this.x - 60;
-            this.hitbox.y = this.y - 10;
-        }
-
-        if (this.state === "special" && this.name === "蒸汽騎士") {
-            this.hasArmor = true;
-            this.vx = this.side === "left" ? 8 : -8;
-            this.hitbox.x = this.side === "left" ? this.x + this.width - 30 : this.x - 50;
-            this.hitbox.y = this.y + 30;
-        }
-
-        this.animTimer++;
-        if (this.animTimer >= this.animSpeed) {
-            this.animTimer = 0;
-            this.frameX = (this.frameX + 1) % this.maxFrames;
-        }
-    }
-
-    draw() {
-        ctx.save();
-        let image = this.name === "黑色武士" ? p1Image : p2Image;
-        let imgWidth = this.name === "黑色武士" ? 64 : 80;
-        let imgHeight = 64;
-
-        if (this.side === "right") {
-            ctx.translate(this.x + this.width / 2, this.y + this.height / 2);
-            ctx.scale(-1, 1);
-            ctx.drawImage(image, this.frameX * imgWidth, this.frameY * imgHeight, imgWidth, imgHeight, -this.width / 2, -this.height / 2, this.width, this.height);
-        } else {
-            ctx.drawImage(image, this.frameX * imgWidth, this.frameY * imgHeight, imgWidth, imgHeight, this.x, this.y, this.width, this.height);
-        }
-        ctx.restore();
-
-        if (this.isInvincible) { ctx.fillStyle = "rgba(255,255,255,0.3)"; ctx.fillRect(this.x, this.y, this.width, this.height); }
-        if (this.hasArmor) { ctx.fillStyle = "rgba(74,252,83,0.2)"; ctx.fillRect(this.x, this.y, this.width, this.height); }
-    }
-
-    lightAttack() {
-        this.changeState("attack", 15);
-        this.vx = 0;
-        this.hitbox.active = true;
-        this.hitbox.w = this.name === "蒸汽騎士" ? 80 : 60;
-        this.hitbox.h = 30;
-        this.hitbox.x = this.side === "left" ? this.x + this.width - 20 : this.x - 40;
-        this.hitbox.y = this.y + 40;
-        this.hitbox.damage = 6;
-        this.hitbox.knockback = 5;
-        this.hitbox.type = "light";
-
-        // 🔊 播放揮刀/出拳音效
-        playSound(SND_SWORD, 0.5);
-    }
-
-    specialAttack() {
-        if (this.name === "黑色武士") {
-            this.changeState("special", 24);
-            this.vy = -10;
-            this.hitbox.active = true;
-            this.hitbox.w = 70; this.hitbox.h = 120;
-            this.hitbox.damage = 15; this.hitbox.knockback = 8;
-            this.hitbox.type = "crimson_slash";
-
-            // 🔊 黑色武士大招：雷電刀鳴聲
-            playSound(SND_SWORD, 0.8);
-        } else {
-            this.changeState("special", 20);
-            this.hitbox.active = true;
-            this.hitbox.w = 60; this.hitbox.h = 60;
-            this.hitbox.damage = 14; this.hitbox.knockback = 14;
-            this.hitbox.type = "steam_charge";
-
-            // 🔊 蒸汽騎士大招：蒸汽噴射爆發現
-            playSound(SND_STEAM, 0.7);
-        }
-    }
-
-    takeDamage(hitbox, attackerX) {
-        if (this.isInvincible) return;
-
-        let sparkX = this.x + this.width / 2;
-        let sparkY = hitbox.y + hitbox.h / 2;
-
-        if (this.isBlocking) {
-            this.changeState("block", 8);
-            this.hp -= hitbox.damage * 0.1;
-            this.vx = this.x > attackerX ? 2 : -2;
-            createHitSpark(sparkX, sparkY);
-            triggerScreenShake(3, 2);
-            
-            // 🔊 防禦成功音效（輕微悶擊聲）
-            playSound(SND_LIGHT_HIT, 0.3);
-            return;
-        }
-
-        createHitSpark(sparkX, sparkY); 
-        
-        // 🔊 根據受擊類型播放對應音效
-        if (hitbox.type === "crimson_slash" || hitbox.type === "steam_charge") {
-            triggerScreenShake(12, 8);
-            playSound(SND_HEAVY_HIT, 0.9); // 大招命中：劇烈爆炸聲
-        } else {
-            triggerScreenShake(6, 4);
-            playSound(SND_LIGHT_HIT, 0.7); // 普通攻擊命中
-        }
-
-        if (attackerX === p1.x) {
-            comboCount++; comboTimer = 60;
-        }
-
-        if (this.hasArmor) { this.hp -= hitbox.damage; return; }
-
-        this.changeState("hit", 20);
-        this.hp -= hitbox.damage;
-        this.hitbox.active = false;
-
-        let dir = this.x > attackerX ? 1 : -1;
-        this.vx = dir * hitbox.knockback;
-        if (hitbox.type === "crimson_slash") this.vy = -5;
+        enemy.hpMax = floor(enemy.hpMax * modifier);
+        enemy.hp = enemy.hpMax;
+        enemy.speed = enemy.speed * speedModifier;
+        enemy.damageMultiplier = 1 + (currentWave - 1) * 0.15; 
+        enemy.aiSpeedUp = min(10, currentWave - 1); 
     }
 }
 
-const p1 = new Fighter(150, 200, "黑色武士", "left");
-const p2 = new Fighter(550, 200, "蒸汽騎士", "right");
-
-const keys = {};
-window.addEventListener("keydown", e => { keys[e.key.toLowerCase()] = true; });
-window.addEventListener("keyup", e => { keys[e.key.toLowerCase()] = false; });
-
-function checkCollision(rect1, rect2) {
-    return rect1.x < rect2.x + rect2.w && rect1.x + rect1.w > rect2.x && rect1.y < rect2.y + rect2.h && rect1.y + rect1.h > rect2.y;
-}
-
-function gameLoop() {
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-    ctx.save();
-    if (screenShakeTimer > 0) {
-        let dx = (Math.random() - 0.5) * screenShakeIntensity;
-        let dy = (Math.random() - 0.5) * screenShakeIntensity;
-        ctx.translate(dx, dy); screenShakeTimer--;
-    }
-
-    ctx.fillStyle = "#1e1e24"; ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.fillStyle = "#3a3a45"; ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
-
-    // P1 控制
-    if (["idle", "run"].includes(p1.state)) {
-        p1.isBlocking = keys['a'] && p1.x > p2.x;
-        if (keys['a']) { p1.vx = -p1.speed; if (p1.state !== "run") p1.changeState("run"); }
-        else if (keys['d']) { p1.vx = p1.speed; if (p1.state !== "run") p1.changeState("run"); }
-        else { p1.vx = 0; if (p1.state !== "idle") p1.changeState("idle"); }
-
-        if (keys['w'] && p1.isGrounded) { p1.vy = -12; p1.isGrounded = false; }
-        if (keys['j']) p1.lightAttack();
-        if (keys['k']) p1.specialAttack();
-    }
-
-    // P2 AI 控制
-    if (["idle", "run"].includes(p2.state)) {
-        let distance = Math.abs(p2.x - p1.x);
-        if (p1.state === "attack" && distance < 140 && Math.random() < 0.5) {
-            p2.isBlocking = p2.x < p1.x ? true : false; p2.vx = 0;
-        } else {
-            p2.isBlocking = false;
-            if (distance > 110) {
-                p2.vx = p2.x > p1.x ? -p2.speed : p2.speed;
-                if (p2.state !== "run") p2.changeState("run");
-                if (Math.random() < 0.008) p2.specialAttack();
-            } else {
-                p2.vx = 0;
-                let attackChoice = Math.random();
-                if (attackChoice < 0.03) p2.lightAttack();
-                else if (attackChoice < 0.045) p2.specialAttack();
-                else if (p2.state !== "idle") p2.changeState("idle");
-            }
-        }
-    }
-
-    if (["idle", "run"].includes(p1.state)) p1.side = p1.x < p2.x ? "left" : "right";
-    if (["idle", "run"].includes(p2.state)) p2.side = p2.x < p1.x ? "left" : "right";
-
-    p1.update(); p2.update();
-
-    if (p1.hitbox.active && checkCollision(p1.hitbox, { x: p2.x, y: p2.y, w: p2.width, h: p2.height })) {
-        p2.takeDamage(p1.hitbox, p1.x); p1.hitbox.active = false;
-    }
-    if (p2.hitbox.active && checkCollision(p2.hitbox, { x: p1.x, y: p1.y, w: p1.width, h: p1.height })) {
-        p1.takeDamage(p2.hitbox, p2.x); p2.hitbox.active = false;
-        comboCount = 0;
-    }
-
-    p1.draw(); p2.draw();
-
-    for (let i = hitSparks.length - 1; i >= 0; i--) {
-        let s = hitSparks[i]; s.x += s.vx; s.y += s.vy; s.alpha -= 0.04;
-        if (s.alpha <= 0) { hitSparks.splice(i, 1); continue; }
-        ctx.fillStyle = s.color; ctx.globalAlpha = s.alpha; ctx.beginPath(); ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2); ctx.fill();
-    }
-    ctx.globalAlpha = 1.0; ctx.restore();
-
-    // UI
-    ctx.fillStyle = "#444"; ctx.fillRect(40, 20, 320, 24); ctx.fillRect(440, 20, 320, 24);
-    ctx.fillStyle = "#ff2a2a";
-    if (p1.hp > 0) ctx.fillRect(40, 20, p1.hp * 3.2, 24);
-    if (p2.hp > 0) ctx.fillRect(440 + (320 - p2.hp * 3.2), 20, p2.hp * 3.2, 24);
-
-    ctx.fillStyle = "#fff"; ctx.font = "bold 16px sans-serif";
-    ctx.fillText(p1.name, 40, 15); ctx.fillText(p2.name, 760 - ctx.measureText(p2.name).width, 15);
-
-    if (comboCount > 1 && comboTimer > 0) {
-        comboTimer--; ctx.fillStyle = "#ffbc00"; ctx.font = "italic bold 36px 'Arial Black'";
-        ctx.strokeStyle = "#000"; ctx.lineWidth = 6;
-        let comboText = comboCount + " COMBO";
-        ctx.strokeText(comboText, 60, 90); ctx.fillText(comboText, 60, 90);
-        if (comboTimer <= 0) comboCount = 0;
-    }
-
-    if (p1.hp <= 0 || p2.hp <= 0) {
-        ctx.fillStyle = "rgba(0,0,0,0.8)"; ctx.fillRect(0,0,canvas.width,canvas.height);
-        ctx.fillStyle = "#ffbc00"; ctx.font = "bold 40px sans-serif";
-        let winner = p1.hp <= 0 ? p2.name : p1.name;
-        ctx.fillText(winner + " 獲勝！", canvas.width/2 - 100, canvas.height/2);
-        bgm.pause(); // 結束時音樂停止
+function nextWaveTransition() {
+    if (currentWave === 3) {
+        gameClear = true;
         return;
     }
-    requestAnimationFrame(gameLoop);
+    currentWave++;
+    player.hp = player.hpMax; 
+    player.x = 60; player.y = GROUND_Y - player.h;
+    player.vx = 0; player.vy = 0;
+    player.state = STATE_IDLE;
+    player.attackCooldown = 0; 
+    
+    projectiles = []; items = []; spawnNextEnemy(); waveClearTimer = 0;
 }
 
-let loadedImages = 0;
-function imgLoaded() { loadedImages++; if(loadedImages === 2) gameLoop(); }
-p1Image.onload = imgLoaded; p2Image.onload = imgLoaded;
+function draw() {
+    if (currentStage === STAGE_SELECT) drawSelectScreen();
+    else if (currentStage === STAGE_FIGHT) drawFightScreen();
+}
+
+function drawSelectScreen() {
+    background(8, 8, 14);
+    
+    stroke(15, 17, 26);
+    for(let i=0; i<V_WIDTH; i+=16) line(i, 0, i, V_HEIGHT);
+    for(let j=0; j<V_HEIGHT; j+=16) line(0, j, V_WIDTH, j);
+    
+    noStroke();
+    fill(255); textSize(11); textFont('monospace');
+    text("SELECT YOUR FIGHTER", V_WIDTH/2 - 58, 20);
+    
+    let boxW = 56; let boxH = 95;
+    let startX = V_WIDTH/2 - (boxW * 5 + 16)/2;
+    
+    for(let i=0; i<5; i++) {
+        let preset = MECHA_PRESETS[i];
+        let x = startX + i * (boxW + 4); let y = 32;
+        
+        fill(14, 15, 23);
+        if (i === playerSelectedIdx) fill(24, 32, 51); 
+        rect(x, y, boxW, boxH, 4);
+        
+        stroke(30, 34, 46);
+        if (i === playerSelectedIdx) stroke(0, 229, 255);
+        else if (i === enemySelectedIdx) stroke(255, 0, 85);
+        strokeWeight(1); noFill(); rect(x, y, boxW, boxH, 4); noStroke();
+        
+        if (i === playerSelectedIdx) { fill(0, 229, 255); textSize(5); text("PLAYER", x+4, y+10); }
+        
+        if (preset.isDragon) drawHQDragon(floor(x + boxW/2), floor(y + 55), preset, 1);
+        else if (preset.isNinja) drawHQNinja(floor(x + boxW/2), floor(y + 55), preset, 1);
+        else drawHQMecha(floor(x + boxW/2), floor(y + 55), preset, 1);
+        
+        fill(255); textSize(6); text(preset.name, x + 4, y + 76);
+        fill(preset.mainColor); textSize(5); text(preset.desc, x + 4, y + 83);
+        fill(140); text("HP:" + preset.hpMax, x + 4, y + 89);
+    }
+    
+    fill(160); textSize(7);
+    text("A / D : SWITCH SELECTION  |  SPACE : ENGAGE BATTLE", V_WIDTH/2 - 90, V_HEIGHT - 10);
+}
+
+function drawHQMecha(cx, cy, preset, flip, state = 'IDLE', timer = 0) {
+    cx = floor(cx); cy = floor(cy);
+    let s = preset.scale;
+    push(); translate(cx, cy); 
+    if (state === STATE_HURT) translate(floor(random(-1, 2)), floor(random(-1, 2)));
+
+    let bob = (state === 'MOVE' || state === 'IDLE') ? floor(sin(frameCount * 0.15) * 0.6) : 0;
+    translate(0, bob); noStroke();
+
+    if(state === 'MOVE' || state === 'IDLE') {
+        fill('#ff5500'); rect(-9*flip*s, -22*s, 2*flip*s, floor((4+random(3))*s));
+    }
+
+    fill(preset.shadowColor); rect(-6*flip*s, -10*s, 4*flip*s, 10*s); rect(2*flip*s, -10*s, 4*flip*s, 10*s);
+    fill(preset.darkColor); rect(-5*flip*s, -10*s, 3*flip*s, 8*s); rect(3*flip*s, -10*s, 3*flip*s, 8*s);
+    fill(preset.mainColor); rect(-5*flip*s, -10*s, 1*flip*s, 5*s); rect(3*flip*s, -10*s, 1*flip*s, 5*s); 
+
+    fill(preset.shadowColor); rect(-8*flip*s, -24*s, 16*s, 14*s);
+    fill(preset.darkColor); rect(-7*flip*s, -24*s, 14*s, 13*s);
+    fill(preset.mainColor); rect(-5*flip*s, -23*s, 10*s, 11*s);
+    fill(preset.liteColor); rect(-4*flip*s, -23*s, 2*flip*s, 8*s); 
+    fill(preset.isBoss ? '#ffe600' : '#00ffff'); rect(-1*flip*s, -18*s, 3*s, 3*s); 
+
+    fill(preset.shadowColor); rect(-5*flip*s, -33*s, 10*s, 9*s);
+    fill(preset.darkColor); rect(-4*flip*s, -33*s, 8*s, 8*s);
+    fill(preset.mainColor); rect(-3*flip*s, -32*s, 6*s, 6*s);
+    fill(preset.liteColor); rect(-3*flip*s, -32*s, 1*flip*s, 4*s); 
+    fill(preset.isBoss ? '#ff0000' : '#fff700'); rect(0, -30*s, 4*flip*s, 2*s); 
+
+    if (state === STATE_ATTACK) {
+        fill(preset.darkColor); rect(-9*flip*s, -23*s, 4*s, 6*s); 
+        fill(preset.darkColor); rect(4*flip*s, -23*s, 20*s*flip, 5*s);
+        fill(preset.mainColor); rect(6*flip*s, -22*s, 17*s*flip, 3*s);
+        fill(preset.liteColor); rect(21*flip*s, -22*s, 3*s*flip, 3*s); 
+    } else {
+        fill(preset.darkColor); rect(-10*flip*s, -23*s, 3*s, 8*s); 
+        fill(preset.mainColor); rect(7*flip*s, -23*s, 3*s, 8*s);
+        fill(preset.liteColor); rect(7*flip*s, -23*s, 1*flip*s, 4*s);
+    }
+    pop();
+}
+
+function drawHQDragon(cx, cy, preset, flip, state = 'IDLE', timer = 0) {
+    cx = floor(cx); cy = floor(cy); let s = preset.scale;
+    push(); translate(cx, cy); 
+    if (state === STATE_HURT) translate(floor(random(-1, 2)), floor(random(-1, 2)));
+    let bob = (state === 'MOVE' || state === 'IDLE') ? floor(sin(frameCount * 0.2) * 0.8) : 0;
+    translate(0, bob); noStroke();
+
+    fill(preset.shadowColor); rect(-18*flip*s, -14*s, 8*flip*s, 5*s);
+    fill(preset.darkColor); rect(-16*flip*s, -13*s, 6*flip*s, 3*s);
+    fill(preset.shadowColor); rect(-8*flip*s, -8*s, 4*s, 8*s); rect(4*flip*s, -8*s, 4*s, 8*s);
+    fill(preset.darkColor); rect(-7*flip*s, -8*s, 3*s, 7*s); rect(5*flip*s, -8*s, 3*s, 7*s);
+    fill(preset.shadowColor); rect(-12*flip*s, -23*s, 22*s, 15*s);
+    fill(preset.darkColor); rect(-11*flip*s, -22*s, 20*s, 13*s);
+    fill(preset.mainColor); rect(-9*flip*s, -21*s, 16*s, 10*s);
+    fill(preset.liteColor); rect(-9*flip*s, -21*s, 2*flip*s, 8*s); 
+    fill(preset.darkColor); rect(6*flip*s, -24*s, 6*flip*s, 7*s);
+    fill(preset.shadowColor); rect(8*flip*s, -32*s, 11*flip*s, 9*s);
+    fill(preset.darkColor); rect(9*flip*s, -32*s, 9*flip*s, 8*s);
+    fill(preset.mainColor); rect(10*flip*s, -31*s, 7*flip*s, 6*s);
+    fill('#ff3300'); rect(14*flip*s, -29*s, 3*flip*s, 2*s); 
+
+    if (state === STATE_ATTACK) {
+        fill(preset.liteColor); rect(12*flip*s, -14*s, 20*flip*s, 6*s);
+        fill('#ffffff'); rect(28*flip*s, -15*s, 5*flip*s, 8*s);
+    } else {
+        fill(preset.darkColor); rect(-2*flip*s, -14*s, 4*flip*s, 7*s);
+    }
+    pop();
+}
+
+function drawHQNinja(cx, cy, preset, flip, state = 'IDLE', timer = 0) {
+    cx = floor(cx); cy = floor(cy); let s = preset.scale;
+    push(); translate(cx, cy); 
+    if (state === STATE_HURT) translate(floor(random(-1, 2)), floor(random(-1, 2)));
+    let bob = (state === 'MOVE' || state === 'IDLE') ? floor(sin(frameCount * 0.25) * 0.5) : 0;
+    translate(0, bob); noStroke();
+
+    fill('#ff0055'); rect(-9*flip*s, -26*s, floor((5 + sin(frameCount*0.3)*3)*flip*s), 3*s);
+    fill(preset.shadowColor); rect(-5*flip*s, -10*s, 3*s, 10*s); rect(1*flip*s, -10*s, 3*s, 10*s);
+    fill(preset.darkColor); rect(-4*flip*s, -10*s, 2*s, 10*s); rect(2*flip*s, -10*s, 2*s, 10*s);
+    fill(preset.shadowColor); rect(-6*flip*s, -24*s, 12*s, 14*s);
+    fill(preset.darkColor); rect(-5*flip*s, -24*s, 10*s, 13*s);
+    fill(preset.mainColor); rect(-3*flip*s, -23*s, 6*s, 11*s);
+    fill(preset.shadowColor); rect(-4*flip*s, -32*s, 8*s, 8*s);
+    fill(preset.darkColor); rect(-3*flip*s, -32*s, 6*s, 7*s);
+    fill('#ffffff'); rect(0, -30*s, 2*flip*s, 1*s); 
+
+    if (state === STATE_ATTACK) {
+        fill(preset.liteColor); rect(2*flip*s, -22*s, 22*s*flip, 4*s);
+        fill('#ffffff'); rect(16*flip*s, -24*s, 10*s*flip, 7*s);
+    } else {
+        fill('#737373'); rect(-8*flip*s, -26*s, 2*flip*s, 12*s);
+        fill(preset.darkColor); rect(4*flip*s, -20*s, 3*s, 6*s);
+    }
+    pop();
+}
+
+function drawFightScreen() {
+    drawPixelBackground();
+    
+    if (player.hp <= 0) gameOver = true;
+    
+    if (enemy.hp <= 0 && !gameOver && !gameClear) {
+        waveClearTimer++;
+        if (waveClearTimer >= 90) nextWaveTransition();
+    }
+    
+    // 🛠️ 【修正關鍵】使用專屬的 bossIntroTimer 來管理前 40 幀的動畫時間
+    if (currentWave === 3 && enemy.hp > 0 && bossIntroTimer < 40) {
+        bossIntroTimer++;
+    }
+    let isBossIntro = (currentWave === 3 && enemy.hp > 0 && bossIntroTimer < 40);
+    
+    if (!gameOver && !gameClear && enemy.hp > 0 && !isBossIntro &&
+        player.state !== STATE_ATTACK && player.state !== STATE_ATTACK_SPECIAL && player.state !== STATE_ATTACK_EX &&
+        enemy.state !== STATE_ATTACK && enemy.state !== STATE_ATTACK_SPECIAL && enemy.state !== STATE_ATTACK_EX) {
+        player.facing = (player.x < enemy.x) ? 1 : -1;
+        enemy.facing = (enemy.x < player.x) ? 1 : -1;
+    }
+    
+    if (!gameOver && enemy.hp > 0 && !gameClear) {
+        itemSpawnTimer++;
+        if (itemSpawnTimer > 450) { 
+            items.push(new RepairItem(random(40, V_WIDTH - 40), -10));
+            itemSpawnTimer = 0;
+        }
+    }
+
+    player.update();
+    if (enemy.hp > 0) enemy.update();
+    
+    if (enemy.hp > 0 && !gameClear && !isBossIntro) {
+        checkHit(player, enemy);
+        checkHit(enemy, player); 
+    }
+    
+    for (let i = items.length - 1; i >= 0; i--) {
+        items[i].update(); items[i].display();
+        if (items[i].checkPickup(player)) { items.splice(i, 1); continue; }
+        if (enemy.hp > 0 && items[i].checkPickup(enemy)) { items.splice(i, 1); continue; }
+    }
+
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+        projectiles[i].update(); projectiles[i].display();
+        if (projectiles[i].checkCollision()) { projectiles.splice(i, 1); continue; }
+        if (projectiles[i].isOutOfBounds()) projectiles.splice(i, 1);
+    }
+    
+    for (let i = FXs.length - 1; i >= 0; i--) {
+        FXs[i].update(); FXs[i].display();
+        if (FXs[i].isDead) FXs.splice(i, 1);
+    }
+    
+    player.display();
+    if (enemy.hp > 0) enemy.display();
+    
+    drawPixelUI();
+}
+
+function keyPressed() {
+    if (keyCode === 32) {
+        if (currentStage === STAGE_SELECT) initBattle();
+        return false; 
+    }
+    if (currentStage === STAGE_SELECT) {
+        let maxIdx = MECHA_PRESETS.length;
+        if (keyCode === 65 || keyCode === 37) { playerSelectedIdx = (playerSelectedIdx - 1 + maxIdx) % maxIdx; }
+        if (keyCode === 68 || keyCode === 39) { playerSelectedIdx = (playerSelectedIdx + 1) % maxIdx; }
+        return;
+    }
+    if (gameOver || gameClear) {
+        if (keyCode === 82) { currentStage = STAGE_SELECT; }
+        return;
+    }
+    if (player.hp > 0) {
+        let isBossIntro = (currentWave === 3 && enemy.hp > 0 && bossIntroTimer < 40);
+        if (!isBossIntro) {
+            if (keyCode === 74 && player.state !== STATE_BLOCK && player.attackCooldown <= 0) {
+                player.changeState(STATE_ATTACK);
+            }
+            if (keyCode === 85 && player.state !== STATE_BLOCK) player.launchSpecialMove(); 
+            if (keyCode === 73 && player.state !== STATE_BLOCK) player.launchEXMove(); 
+        }
+    }
+}
+
+function drawPixelBackground() {
+    background(10, 11, 18); 
+    
+    if (currentWave === 3) stroke(36, 12, 15); else stroke(18, 20, 31);
+    for(let i=0; i<V_WIDTH; i+=32) line(i, 0, i, GROUND_Y);
+    
+    if (currentWave === 3) fill(41, 15, 18); else fill(20, 22, 36);
+    noStroke();
+    rect(30, 20, 25, GROUND_Y-20); rect(145, 10, 40, GROUND_Y-10); rect(265, 30, 20, GROUND_Y-30);
+    
+    noStroke(); fill(29, 32, 45); rect(0, GROUND_Y, V_WIDTH, V_HEIGHT - GROUND_Y);
+    
+    if (currentWave === 3) {
+        stroke(255, 51, 0, 120); line(0, GROUND_Y, V_WIDTH, GROUND_Y);
+    } else {
+        stroke(0, 229, 255, 100); line(0, GROUND_Y, V_WIDTH, GROUND_Y);
+    }
+    stroke(255, 0, 85, 40); line(0, GROUND_Y+1, V_WIDTH, GROUND_Y+1); noStroke();
+}
+
+function checkHit(attacker, defender) {
+    if (attacker.state === STATE_ATTACK && attacker.stateTimer > 0 && attacker.stateTimer <= 10 && !attacker.hasHit) {
+        let hitbox = attacker.getHitbox();
+        let hurtbox = defender.getHurtbox();
+        
+        if (hitbox.x < hurtbox.x + hurtbox.w && hitbox.x + hitbox.w > hurtbox.x &&
+            hitbox.y < hurtbox.y + hurtbox.h && hitbox.y + hitbox.h > hurtbox.y) {
+            
+            let baseDmg = attacker.isNinja ? 12 : 10;
+            let finalDmg = floor(baseDmg * attacker.damageMultiplier);
+            
+            defender.takeDamage(finalDmg, attacker.facing);
+            attacker.hasHit = true; 
+            attacker.exMeter = min(100, attacker.exMeter + 12); 
+            
+            let sparkColor = defender.state === STATE_BLOCK ? '#00ffff' : (attacker.isDragon ? '#ff4500' : (attacker.isNinja ? '#ff00ff' : '#ffcc00'));
+            
+            for(let i=0; i<12; i++) {
+                FXs.push(new PixelParticle(hitbox.x + hitbox.w/2, hitbox.y + hitbox.h/2, defender.state === STATE_BLOCK ? '#00ffff' : '#ffffff'));
+                FXs.push(new PixelParticle(hitbox.x + hitbox.w/2, hitbox.y + hitbox.h/2, sparkColor));
+            }
+        }
+    }
+}
+
+function drawPixelUI() {
+    noStroke(); fill(16, 17, 26);
+    rect(8, 6, 108, 10, 2); rect(V_WIDTH - 116, 6, 108, 10, 2);
+    
+    fill(40, 15, 20); rect(10, 8, 104, 6); rect(V_WIDTH - 114, 8, 104, 6);
+    
+    fill(player.mainColor); rect(12, 9, map(player.hp, 0, player.hpMax, 0, 100), 4);
+    if (enemy.hp > 0) {
+        fill(enemy.mainColor); rect(V_WIDTH - 114 + (100 - map(enemy.hp, 0, enemy.hpMax, 0, 100)), 9, map(enemy.hp, 0, enemy.hpMax, 0, 100), 4);
+    }
+    
+    fill(20, 22, 33); rect(10, 18, 50, 4); rect(V_WIDTH - 60, 18, 50, 4);
+    fill('#00e5ff'); rect(11, 19, map(player.exMeter, 0, 100, 0, 48), 2);
+    fill('#ff00ff'); rect(V_WIDTH - 60 + (48 - map(enemy.exMeter, 0, 100, 0, 48)), 19, map(enemy.exMeter, 0, 100, 0, 48), 2);
+    
+    fill(240); textSize(5);
+    text("P1: " + player.name, 10, 5); 
+    text(currentWave === 3 ? "👑 BOSS: " + enemy.name : "CPU: " + enemy.name, V_WIDTH - 114, 5);
+    
+    if (currentWave === 3) {
+        if (frameCount % 30 < 20) { fill('#ff1100'); } else { fill('#fff700'); }
+        textSize(8); text("FINAL BOSS WAVE", V_WIDTH/2 - 32, 13);
+    } else {
+        fill('#fff700'); textSize(8); text("WAVE " + currentWave, V_WIDTH/2 - 14, 13);
+    }
+    
+    if (player.specialCD > 0) {
+        fill('#ff4a4a'); textSize(5); text("U-CD: " + (player.specialCD / 60).toFixed(1) + "s", V_WIDTH/2 - 16, 22);
+    } else {
+        fill('#39ff14'); textSize(5); text("U-READY", V_WIDTH/2 - 12, 22);
+    }
+    
+    if(player.exMeter >= 100 && frameCount % 20 < 12) { fill('#fff700'); textSize(5); text("⚡ EX SKILL READY [I]", 10, 29); }
+
+    let subSkillName = player.isDragon ? "TAIL_SWIPE" : (player.isNinja ? "NINJA_SLASH" : "PUNCH");
+    fill(150); textSize(5);
+    text("A/D:MOVE W:JUMP S:BLOCK | J:" + subSkillName + " U:" + player.preset.skill + " I:" + player.preset.exSkill, 10, V_HEIGHT - 4);
+
+    if (enemy.hp <= 0 && !gameOver && !gameClear) {
+        fill('#39ff14'); textSize(12); text("WAVE CLEAR!", V_WIDTH/2 - 42, V_HEIGHT/2 - 10);
+        textSize(5); fill(255); text("LOADING NEXT COMBATANT...", V_WIDTH/2 - 45, V_HEIGHT/2 + 5);
+    }
+    
+    if (currentWave === 3 && enemy.hp > 0 && bossIntroTimer < 40) {
+        if (frameCount % 10 < 6) {
+            fill(255, 0, 0, 180); rect(0, V_HEIGHT/2 - 20, V_WIDTH, 30);
+            fill(255); textSize(11); text("⚠️ WARNING: OMEGA MECHA DETECTED", V_WIDTH/2 - 95, V_HEIGHT/2 - 2);
+        }
+    }
+
+    if (gameOver) {
+        background(0, 0, 0, 180); 
+        textSize(14); fill(255, 30, 30); text("SYSTEM DEFEATED", V_WIDTH/2 - 58, V_HEIGHT/2 - 5);
+        fill(255); textSize(6); text("PRESS [R] TO REBOOT SELECTION", V_WIDTH/2 - 50, V_HEIGHT/2 + 15);
+    }
+
+    if (gameClear) {
+        background(0, 15, 8, 200);
+        textSize(15); fill(0, 255, 150); text("MISSION ACCOMPLISHED", V_WIDTH/2 - 75, V_HEIGHT/2 - 5);
+        fill(255); textSize(6); text("YOU HAVE DESTROYED THE OMEGA MECHA! PRESS [R] TO RESET", V_WIDTH/2 - 82, V_HEIGHT/2 + 15);
+    }
+}
+
+class MechaFighter {
+    constructor(x, y, w, h, preset, isPlayer) {
+        this.preset = preset; this.name = preset.name;
+        this.mainColor = preset.mainColor; this.darkColor = preset.darkColor;
+        this.isPlayer = isPlayer; this.isDragon = preset.isDragon; this.isNinja = preset.isNinja; this.isBoss = preset.isBoss;
+        
+        this.scale = preset.scale;
+        this.w = this.isDragon ? (w * 1.5 * this.scale) : (w * this.scale);
+        this.h = h * this.scale;
+        
+        this.speed = isPlayer ? preset.speed : preset.speed * 0.75; 
+        this.jumpForce = preset.jumpForce;
+        this.hpMax = preset.hpMax; this.hp = this.hpMax; this.exMeter = 20; 
+
+        this.specialCD = 0; this.maxCD = 180;
+        this.attackCooldown = 0; this.blockCooldown = 0;
+
+        this.damageMultiplier = 1.0; this.aiSpeedUp = 0;
+
+        this.x = x; this.y = GROUND_Y - this.h;
+        this.vx = 0; this.vy = 0; this.isGrounded = true;
+        this.facing = 1; this.hasHit = false;
+        this.state = STATE_IDLE; this.stateTimer = 0;
+        this.aiDecisionTimer = 0;
+    }
+    
+    changeState(newState) {
+        if (this.state === STATE_HURT && newState !== STATE_HURT) return; 
+        if ((this.state === STATE_ATTACK || this.state === STATE_ATTACK_SPECIAL || this.state === STATE_ATTACK_EX) && newState !== STATE_HURT && newState !== STATE_IDLE) return;
+        if (newState === STATE_ATTACK && this.attackCooldown > 0) return;
+
+        this.state = newState; this.stateTimer = 0;
+        if (newState === STATE_ATTACK) {
+            this.hasHit = false;
+            this.vx = this.facing * (this.isNinja ? 4.5 : 3.5); 
+            this.attackCooldown = 32; 
+        }
+        if (newState === STATE_BLOCK) this.blockCooldown = 70;
+    }
+
+    launchSpecialMove() {
+        if (this.specialCD === 0 && (this.state === STATE_IDLE || this.state === STATE_MOVE)) {
+            this.specialCD = this.maxCD; 
+            this.changeState(STATE_ATTACK_SPECIAL);
+            
+            let spawnX = (this.facing === 1) ? (this.x + this.w) : (this.x - 10);
+            let spawnY = this.y + (this.isDragon ? 4 : (this.isNinja ? 12 : 11)) * this.scale;
+            projectiles.push(new UniqueProjectile(spawnX, spawnY, this.facing, this, this.preset.projType, false, 0));
+        }
+    }
+
+    launchEXMove() {
+        if (this.exMeter >= 100 && (this.state === STATE_IDLE || this.state === STATE_MOVE)) {
+            this.exMeter = 0; this.changeState(STATE_ATTACK_EX);
+            
+            for(let i=0; i<25; i++) {
+                FXs.push(new PixelParticle(this.x + this.w/2 + random(-15,15), this.y + this.h/2 + random(-15,15), '#ffffff'));
+                FXs.push(new PixelParticle(this.x + this.w/2, this.y + this.h/2, this.mainColor));
+            }
+            
+            let spawnX = (this.facing === 1) ? (this.x + this.w) : (this.x - 12);
+            let spawnY = this.y + 14 * this.scale;
+            
+            if (this.isNinja) {
+                projectiles.push(new UniqueProjectile(spawnX, spawnY - 10, this.facing, this, this.preset.projType, true, -0.25)); 
+                projectiles.push(new UniqueProjectile(spawnX, spawnY, this.facing, this, this.preset.projType, true, 0));       
+                projectiles.push(new UniqueProjectile(spawnX, spawnY + 10, this.facing, this, this.preset.projType, true, 0.25));  
+            } else {
+                projectiles.push(new UniqueProjectile(spawnX, spawnY, this.facing, this, this.preset.projType, true, 0));
+            }
+        }
+    }
+    
+    getHitbox() {
+        let hitboxW = (this.isDragon || this.isNinja ? 55 : 45) * this.scale;
+        let hitboxH = (this.isDragon ? 12 : (this.isNinja ? 14 : 10)) * this.scale;
+        let hitboxX = (this.facing === 1) ? (this.x + this.w - 4) : (this.x - hitboxW + 4);
+        return { x: hitboxX, y: this.y + (this.isDragon ? 16 : (this.isNinja ? 8 : 6)) * this.scale, w: hitboxW, h: hitboxH };
+    }
+    getHurtbox() { return { x: this.x, y: this.y, w: this.w, h: this.h }; }
+    
+    takeDamage(amount, attackerFacing) {
+        if (this.state === STATE_BLOCK) {
+            let blockedAmount = amount === 999 ? 149 : floor(amount * 0.15); 
+            this.hp = Math.max(0, this.hp - blockedAmount);
+            this.exMeter = min(100, this.exMeter + 8); 
+            this.vx = attackerFacing * (amount === 999 ? 4.0 : 0.5); 
+            return;
+        }
+        this.hp = Math.max(0, this.hp - amount); 
+        this.changeState(STATE_HURT); this.exMeter = min(100, this.exMeter + 15); 
+        let weightFactor = (this.name === "MECHA_02" || this.isDragon || this.isBoss) ? 0.3 : 1.0;
+        this.vx = attackerFacing * 3.6 * weightFactor;  
+        this.vy = -1.8 * weightFactor; this.isGrounded = false;                        
+    }
+    
+    update() {
+        this.stateTimer++;
+        if (this.hp <= 0) { this.vx = 0; return; }
+        
+        if (this.specialCD > 0) this.specialCD--;
+        if (this.attackCooldown > 0) this.attackCooldown--; 
+        if (this.blockCooldown > 0) this.blockCooldown--; 
+        
+        let chargeRate = this.isBoss ? 0.12 : 0.04;
+        if (frameCount % 3 === 0 && this.exMeter < 100) this.exMeter += chargeRate;
+
+        if (!this.isGrounded || this.state === STATE_MOVE) {
+            if (frameCount % 3 === 0) {
+                let tailX = this.facing === 1 ? this.x : this.x + this.w;
+                FXs.push(new PixelParticle(tailX + random(-2,2), this.y + this.h/2 + random(-4,4), this.isBoss ? '#ff1100' : '#ff7700'));
+            }
+        }
+
+        // 🛠Header 【修正關鍵】阻斷機制改用 bossIntroTimer 作為判定基礎
+        let isBossIntro = (currentWave === 3 && enemy.hp > 0 && bossIntroTimer < 40);
+        if (isBossIntro) { this.vx = 0; return; }
+
+        if (this.isPlayer && this.isGrounded && keyIsDown(83)) {
+            if (this.state === STATE_IDLE || this.state === STATE_MOVE) this.state = STATE_BLOCK;
+        } else if (this.isPlayer && this.state === STATE_BLOCK && !keyIsDown(83)) {
+            this.state = STATE_IDLE; 
+        }
+
+        switch (this.state) {
+            case STATE_IDLE:
+            case STATE_MOVE:
+                if (this.isPlayer) this.handleInput(); else this.handleAI();
+                break;
+            case STATE_BLOCK:
+                this.vx = 0; 
+                if (!this.isPlayer && this.stateTimer >= 15) this.state = STATE_IDLE;
+                break;
+            case STATE_ATTACK:
+                this.vx *= 0.85;
+                if (this.stateTimer >= 14) this.changeState(STATE_IDLE);
+                break;
+            case STATE_ATTACK_SPECIAL:
+                this.vx = 0;
+                if (this.stateTimer >= (this.isBoss ? 45 : 22)) this.changeState(STATE_IDLE);
+                break;
+            case STATE_ATTACK_EX: 
+                this.vx = 0;
+                if (this.stateTimer >= (this.isBoss ? 60 : 35)) this.changeState(STATE_IDLE);
+                break;
+            case STATE_HURT:
+                this.vx *= 0.86;
+                if (this.stateTimer >= 16 && this.isGrounded) this.state = STATE_IDLE; 
+                break;
+        }
+        
+        this.vy += GRAVITY; this.x += this.vx; this.y += this.vy;
+        
+        if (this.y + this.h >= GROUND_Y) { 
+            this.y = GROUND_Y - this.h; this.vy = 0; this.isGrounded = true; 
+            if (this.state === STATE_HURT && this.stateTimer >= 16) this.state = STATE_IDLE;
+        } else { 
+            this.isGrounded = false; 
+            if (this.state === STATE_BLOCK) this.state = STATE_IDLE; 
+        } 
+        this.x = constrain(this.x, 0, V_WIDTH - this.w);
+    }
+    
+    handleInput() {
+        this.vx = 0; let moving = false;
+        if (keyIsDown(65)) { this.vx = -this.speed; moving = true; }
+        if (keyIsDown(68)) { this.vx = this.speed; moving = true; }
+        if (moving && this.isGrounded) this.changeState(STATE_MOVE);
+        else if (!moving && this.isGrounded) this.changeState(STATE_IDLE);
+        if (keyIsDown(87) && this.isGrounded) { this.vy = this.jumpForce; this.isGrounded = false; }
+    }
+    
+    handleAI() {
+        this.aiDecisionTimer++; this.vx = 0;
+        let playerCenterX = player.x + player.w / 2;
+        let enemyCenterX = this.x + this.w / 2;
+        let distance = abs(playerCenterX - enemyCenterX);
+        
+        let decisionInterval = max(4, 15 - this.aiSpeedUp);
+        
+        if (this.aiDecisionTimer >= decisionInterval) {
+            this.aiDecisionTimer = 0;
+            
+            if (this.exMeter >= 100) { this.launchEXMove(); return; }
+            
+            if (distance < this.w + 15 && player.state === STATE_ATTACK && this.blockCooldown <= 0) {
+                if (random(1) < 0.5) { this.changeState(STATE_BLOCK); return; }
+            }
+            if (distance > this.w + 20) {
+                let r = random(1);
+                if (r < 0.35 && this.specialCD === 0) { this.launchSpecialMove(); return; }
+                else if (r < 0.9) this.aiAction = 'APPROACH';
+                else this.aiAction = 'STAND';
+            } else {
+                let r = random(1);
+                if (r < 0.75 && this.attackCooldown <= 0) this.aiAction = 'ATTACK';
+                else this.aiAction = 'BACK_OFF';
+            }
+        }
+        if (this.aiAction === 'APPROACH') { this.vx = (enemyCenterX < playerCenterX) ? this.speed : -this.speed; this.changeState(STATE_MOVE); } 
+        else if (this.aiAction === 'BACK_OFF') { this.vx = (enemyCenterX < playerCenterX) ? -this.speed : this.speed; this.changeState(STATE_MOVE); } 
+        else if (this.aiAction === 'ATTACK') this.changeState(STATE_ATTACK);
+        else this.changeState(STATE_IDLE);
+    }
+    
+    display() {
+        let cx = floor(this.x + this.w / 2);
+        let cy = floor(this.y + this.h);
+        
+        if (this.state === STATE_ATTACK && this.stateTimer < 8) {
+            push(); noStroke();
+            fill(this.preset.mainColor + "55"); 
+            let smearW = floor(35 * this.scale);
+            let smearX = this.facing === 1 ? cx + 12 : cx - 12 - smearW;
+            rect(smearX, floor(this.y + 6*this.scale), smearW, floor(14*this.scale), 4);
+            pop();
+        }
+
+        if (this.state === STATE_ATTACK_EX && this.isBoss && this.stateTimer < 45) {
+            push(); noStroke();
+            if (frameCount % 6 < 3) fill(255, 0, 0, 90); else fill(255, 230, 0, 90);
+            ellipse(cx, this.y + this.h/2, 50, 50);
+            pop();
+        }
+
+        if (this.isDragon) drawHQDragon(cx, cy, this.preset, this.facing, this.state, this.stateTimer);
+        else if (this.isNinja) drawHQNinja(cx, cy, this.preset, this.facing, this.state, this.stateTimer);
+        else drawHQMecha(cx, cy, this.preset, this.facing, this.state, this.stateTimer);
+
+        if (this.state === STATE_BLOCK) {
+            push(); stroke(this.mainColor); strokeWeight(this.isBoss ? 4 : 2); noFill();
+            let arcX = cx + (8 * this.facing);
+            let arcY = floor(this.y + this.h/2);
+            let arcSize = floor(40 * this.scale);
+            if (this.facing === 1) arc(arcX, arcY, arcSize, arcSize, -HALF_PI, HALF_PI);
+            else arc(arcX, arcY, arcSize, arcSize, HALF_PI, PI + HALF_PI);
+            pop();
+        }
+    }
+}
+
+class UniqueProjectile {
+    constructor(x, y, facing, owner, type, isEX, vyAngle = 0) {
+        this.x = x; this.y = y; this.facing = facing;
+        this.owner = owner; this.type = type; this.isEX = isEX; this.angle = 0;
+        this.vyAngle = vyAngle; 
+        let sizeMultiplier = isEX ? 1.8 : 1.0; 
+        let m = owner.damageMultiplier;
+        
+        if (type === 'SHURIKEN') {
+            this.w = 10 * sizeMultiplier; 
+            this.h = 10 * sizeMultiplier; 
+            this.speed = 6.0; 
+            this.damage = floor((isEX ? 50 : 22) * m); 
+        }
+        else if (type === 'PLASMA') { this.w = 12 * sizeMultiplier; this.h = 8 * sizeMultiplier; this.speed = 4.5; this.damage = floor((isEX ? 65 : 24) * m); } 
+        else if (type === 'LASER') { this.w = 32 * sizeMultiplier; this.h = 5 * sizeMultiplier; this.speed = 6.5; this.damage = floor((isEX ? 70 : 28) * m); } 
+        else if (type === 'MISSILE') { this.w = 8 * sizeMultiplier; this.h = 5 * sizeMultiplier; this.speed = 4.2; this.damage = floor((isEX ? 55 : 20) * m); this.seed = random(100); } 
+        else if (type === 'DRAGON_FIRE') { this.w = 11 * sizeMultiplier; this.h = 11 * sizeMultiplier; this.speed = 3.5; this.damage = floor((isEX ? 75 : 26) * m); } 
+        else if (type === 'BOSS_NUKE') {
+            if (isEX) {
+                this.w = 52; this.h = 24; this.speed = 2.6; this.damage = 999; 
+            } else {
+                this.w = 28; this.h = 6; this.speed = 5.5; this.damage = 35;
+            }
+        }
+    }
+    update() { 
+        this.x += this.speed * this.facing; 
+        this.y += this.vyAngle * this.speed; 
+        
+        if (this.type === 'MISSILE') this.y += sin(frameCount * 0.3 + this.seed) * 1.5; 
+        if (this.type === 'DRAGON_FIRE') this.y += sin(frameCount * 0.15) * 0.5; 
+        if (this.type === 'SHURIKEN') this.angle += 0.4 * this.facing;
+    }
+    display() { 
+        push(); noStroke(); 
+        let px = floor(this.x); let py = floor(this.y);
+        
+        if (this.type === 'BOSS_NUKE' && this.isEX) {
+            fill('#ff1100'); rect(px - this.w/2, py - this.h/2, this.w, this.h, 4);
+            fill('#ffe600'); rect(this.facing === 1 ? px + this.w/4 : px - this.w/2, py - this.h/4, this.w/4, this.h/2, 2); 
+            fill('#ffffff'); rect(px - this.w/3, py - this.h/6, this.w/2, this.h/3); 
+            if (frameCount % 4 < 2) fill('#ff7700'); else fill('#ffcc00');
+            let fireX = this.facing === 1 ? px - this.w/2 - 12 : px + this.w/2;
+            rect(fireX, py - 6, 12, 12);
+        } 
+        else if (this.type === 'SHURIKEN') {
+            translate(px, py);
+            rotate(this.angle);
+            fill(this.isEX ? '#ffffff' : '#ff00ff');
+            rect(-this.w/2, -2, this.w, 4, 1);
+            rect(-2, -this.h/2, 4, this.h, 1);
+            fill('#ffffff');
+            rect(-2, -2, 4, 4);
+        }
+        else {
+            fill(this.isEX ? '#ffaa00' : this.owner.mainColor); rect(px - this.w/2, py - this.h/2, this.w, this.h, 2); 
+        }
+        pop(); 
+    }
+    checkCollision() { 
+        let target = (this.owner.isPlayer) ? enemy : player; let hurtbox = target.getHurtbox(); 
+        if (this.x + this.w/2 > hurtbox.x && this.x - this.w/2 < hurtbox.x + hurtbox.w && this.y + this.h/2 > hurtbox.y && this.y - this.h/2 < hurtbox.y + hurtbox.h) { 
+            
+            target.takeDamage(this.damage, this.facing); 
+            
+            let particleCount = this.damage === 999 ? 45 : 15;
+            let pColor = this.type === 'SHURIKEN' ? '#ff00ff' : (this.damage === 999 ? '#ff1100' : '#ffcc00'); 
+            for(let i=0; i<particleCount; i++) {
+                FXs.push(new PixelParticle(this.x, this.y, pColor)); 
+                if (this.damage === 999) FXs.push(new PixelParticle(this.x + random(-20,20), this.y + random(-20,20), '#fff700'));
+            }
+            return true; 
+        } return false; 
+    }
+    isOutOfBounds() { return (this.x < -100 || this.x > V_WIDTH + 100 || this.y < -50 || this.y > V_HEIGHT + 50); }
+}
+
+class RepairItem {
+    constructor(x, y) { this.x = x; this.y = y; this.w = 10; this.h = 10; this.vy = 1.5; this.isGrounded = false; }
+    update() { if (!this.isGrounded) { this.y += this.vy; if (this.y + this.h >= GROUND_Y) { this.y = GROUND_Y - this.h; this.isGrounded = true; } } }
+    display() { push(); noStroke(); let px = floor(this.x); let py = floor(this.y); if (frameCount % 15 < 10) fill('#39ff14'); else fill('#007f00'); rect(px, py, this.w, this.h, 2); fill('#ffffff'); rect(px + 4, py + 2, 2, 6); rect(px + 2, py + 4, 6, 2); pop(); }
+    checkPickup(fighter) { let hurtbox = fighter.getHurtbox(); if (this.x + this.w > hurtbox.x && this.x < hurtbox.x + hurtbox.w && this.y + this.h > hurtbox.y && this.y < hurtbox.y + hurtbox.h) { fighter.hp = min(fighter.hpMax, fighter.hp + 60); for(let i=0; i<12; i++) { FXs.push(new PixelParticle(this.x + this.w/2, this.y + this.h/2, '#39ff14')); } return true; } return false; }
+}
+
+class PixelParticle { 
+    constructor(x, y, colorHex) { 
+        this.x = x; this.y = y; 
+        this.vx = random(-2.2, 2.2); this.vy = random(-1.8, 1.2); 
+        this.size = floor(random(1, 4)); this.color = colorHex; 
+        this.life = 255; this.isDead = false; 
+    } 
+    update() { this.x += this.vx; this.y += this.vy; this.life -= 12; if (this.life <= 0) this.isDead = true; } 
+    display() { push(); noStroke(); let c = color(this.color); c.setAlpha(this.life); fill(c); rect(floor(this.x), floor(this.y), this.size, this.size); pop(); } 
+}
 </script>
+
 </body>
 </html>
